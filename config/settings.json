@@ -1,0 +1,26 @@
+{
+  "llm": {
+    "provider": "claude",
+    "model": "claude-3-5-sonnet-20241022",
+    "temperature": 0.7,
+    "max_tokens": 4096
+  },
+  "ui": {
+    "theme": "light",
+    "language": "zh-CN",
+    "auto_hide": true
+  },
+  "hotkey": {
+    "enabled": true,
+    "modifiers": ["Ctrl", "Alt"],
+    "key": "Z"
+  },
+  "skills": {
+    "directory": "skills",
+    "auto_reload": true
+  },
+  "browser": {
+    "extension_id": "",
+    "enabled": false
+  }
+}

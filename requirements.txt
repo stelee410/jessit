@@ -1,0 +1,23 @@
+# UI框架
+PyQt6>=6.5.0
+
+# LLM SDK
+anthropic>=0.18.0
+openai>=1.0.0
+
+# 自动化
+pyautogui>=0.9.54
+pydirectinput>=1.0.4
+uiautomation>=2.0.0
+
+# Windows API
+pywin32>=306
+
+# Office
+openpyxl>=3.1.2
+pandas>=2.1.0
+
+# 其他
+pyyaml>=6.0
+pydantic>=2.0.0
+python-dotenv>=1.0.0

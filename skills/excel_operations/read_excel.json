@@ -1,0 +1,21 @@
+{
+  "name": "read_excel",
+  "description": "读取Excel文件内容",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "file_path": {
+        "type": "string",
+        "description": "Excel文件的完整路径"
+      },
+      "sheet_name": {
+        "type": "string",
+        "description": "工作表名称，默认为第一个工作表",
+        "default": null
+      }
+    },
+    "required": ["file_path"]
+  },
+  "handler": "excel.read",
+  "enabled": true
+}
