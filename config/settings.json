@@ -11,9 +11,9 @@
     "auto_hide": true
   },
   "hotkey": {
-    "enabled": true,
+    "enabled": false,
     "modifiers": ["Ctrl", "Alt"],
-    "key": "Z"
+    "key": "j"
   },
   "skills": {
     "directory": "skills",

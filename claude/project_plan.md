@@ -136,7 +136,7 @@ Chrome Extension <---> Native Messaging <---> Python Backend
 ### 阶段 1: 基础框架搭建
 - [x] 项目初始化
 - [x] 托盘图标实现
-- [x] 快捷键捕获 (Ctrl+Alt+Z)
+- [x] 快捷键捕获 (Ctrl+Alt+J)
 - [x] 基础聊天窗口UI
 - [x] LLM接口抽象和Claude集成
 

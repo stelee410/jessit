@@ -9,8 +9,10 @@ from typing import Optional
 
 from src.ui.tray import JessitTray
 from src.ui.chat_window import ChatWindow
+from src.ui.hotkey import HotKeyManager
 from src.core.agent import JessitAgent
 from src.core.llm import LLMConfig
+from src.core.config import get_hotkey_config
 
 
 class JessitApp(QObject):
@@ -22,6 +24,7 @@ class JessitApp(QObject):
         self.agent: Optional[JessitAgent] = None
         self.tray: Optional[JessitTray] = None
         self.app: Optional[QApplication] = None
+        self.hotkey_manager: Optional[HotKeyManager] = None
         self.llm_config = llm_config
         
         self._initialize_application()
@@ -35,6 +38,10 @@ class JessitApp(QObject):
             self._create_agent()
             self._create_chat_window()
             self._setup_tray_menu()
+            # 先显示聊天窗口
+            self._show_chat_window_on_startup()
+            # 聊天窗口显示后再注册热键
+            self._setup_hotkey()
         except Exception as e:
             print(f"初始化失败: {e}")
             import traceback
@@ -71,6 +78,53 @@ class JessitApp(QObject):
     def _setup_tray_menu(self) -> None:
         """设置托盘菜单"""
         self.tray.setup_menu()
+    
+    def _show_chat_window_on_startup(self) -> None:
+        """启动时显示聊天窗口"""
+        try:
+            if self.chat_window:
+                self.chat_window.show()
+                self.chat_window.activateWindow()
+                self.chat_window.raise_()
+                if hasattr(self.chat_window, 'input_field'):
+                    self.chat_window.input_field.setFocus()
+        except Exception as e:
+            print(f"显示聊天窗口时出错: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _setup_hotkey(self) -> None:
+        """设置全局热键（在聊天窗口显示后调用）"""
+        try:
+            hotkey_config = get_hotkey_config()
+            
+            if not hotkey_config.get("enabled", True):
+                print("热键功能已禁用")
+                return
+            
+            modifiers = hotkey_config.get("modifiers", ["Ctrl", "Alt"])
+            key = hotkey_config.get("key", "J")
+            
+            self.hotkey_manager = HotKeyManager(self)
+            self.hotkey_manager.hotkey_triggered.connect(self._on_show_chat)
+            
+            # 使用聊天窗口作为父对象，确保 HotkeyWindow 有有效的父窗口
+            parent_widget = self.chat_window if self.chat_window else None
+            
+            # 不使用聊天窗口句柄，让 HotKeyManager 创建专门的 HotkeyWindow
+            # 但传递聊天窗口作为父对象
+            if self.hotkey_manager.register_hotkey(modifiers, key, hwnd=None, parent_widget=parent_widget):
+                hotkey_str = "+".join(modifiers) + "+" + key
+                if self.tray:
+                    self.tray.show_message("Jessit", f"热键已注册: {hotkey_str}")
+            else:
+                print("警告: 热键注册失败，但应用将继续运行")
+                
+        except Exception as e:
+            print(f"设置热键时出错: {e}")
+            import traceback
+            traceback.print_exc()
+            print("热键设置失败，但应用将继续运行")
 
     @pyqtSlot()
     def _on_show_chat(self) -> None:
@@ -81,8 +135,10 @@ class JessitApp(QObject):
 
             if not self.chat_window.isVisible():
                 self.chat_window.show()
+            
             self.chat_window.activateWindow()
             self.chat_window.raise_()
+            
             if hasattr(self.chat_window, 'input_field'):
                 self.chat_window.input_field.setFocus()
         except Exception as e:
@@ -93,6 +149,10 @@ class JessitApp(QObject):
     @pyqtSlot()
     def _on_quit(self) -> None:
         """退出应用"""
+        # 注销热键
+        if self.hotkey_manager:
+            self.hotkey_manager.unregister_hotkey()
+        
         if self.app:
             self.app.quit()
 
