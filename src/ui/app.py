@@ -16,22 +16,23 @@ from src.core.llm import LLMConfig
 class JessitApp(QObject):
     """Jessit应用主类"""
 
-    def __init__(self, api_key: str):
+    def __init__(self, llm_config: LLMConfig):
         super().__init__()
         self.chat_window: Optional[ChatWindow] = None
         self.agent: Optional[JessitAgent] = None
         self.tray: Optional[JessitTray] = None
         self.app: Optional[QApplication] = None
+        self.llm_config = llm_config
         
-        self._initialize_application(api_key)
+        self._initialize_application()
 
-    def _initialize_application(self, api_key: str) -> None:
+    def _initialize_application(self) -> None:
         """初始化应用程序"""
         try:
             self._create_qt_application()
             self._check_system_tray()
             self._create_tray_icon()
-            self._create_agent(api_key)
+            self._create_agent()
             self._create_chat_window()
             self._setup_tray_menu()
         except Exception as e:
@@ -59,10 +60,9 @@ class JessitApp(QObject):
         self.tray.clear_context.connect(self._on_clear_context)
         self.tray.show()
 
-    def _create_agent(self, api_key: str) -> None:
+    def _create_agent(self) -> None:
         """创建Agent"""
-        llm_config = LLMConfig(api_key=api_key)
-        self.agent = JessitAgent(llm_config, provider_type="claude")
+        self.agent = JessitAgent(self.llm_config, provider_type="claude")
 
     def _create_chat_window(self) -> None:
         """创建聊天窗口"""

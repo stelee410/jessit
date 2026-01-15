@@ -16,7 +16,7 @@ class LLMConfig:
 
     api_key: str
     base_url: Optional[str] = None
-    model: str = "default"
+    model: Optional[str] = None
     temperature: float = 0.7
     max_tokens: int = 4096
 
@@ -61,8 +61,37 @@ class ClaudeProvider(LLMProvider):
 
     def __init__(self, config: LLMConfig):
         super().__init__(config)
-        self.client = anthropic.AsyncAnthropic(api_key=config.api_key)
+        kwargs = {"api_key": config.api_key}
+        if config.base_url:
+            kwargs["base_url"] = config.base_url
+        self.client = anthropic.AsyncAnthropic(**kwargs)
         self.default_model = config.model or "claude-3-5-sonnet-20241022"
+
+    def _diagnostics(self) -> str:
+        """构造诊断信息（不包含敏感信息）"""
+        base_url = self.config.base_url or "default"
+        model = self.default_model or "unknown"
+        return f"model={model}, base_url={base_url}"
+
+    def _process_messages(self, messages: List[Dict[str, str]]) -> tuple[str, List[Dict[str, str]]]:
+        """处理消息列表，提取system消息
+        返回: (system_message, filtered_messages)
+        """
+        system_messages = []
+        filtered_messages = []
+        
+        for msg in messages:
+            if msg.get("role") == "system":
+                system_messages.append(msg.get("content", ""))
+            else:
+                # 只保留user和assistant角色的消息
+                if msg.get("role") in ("user", "assistant"):
+                    filtered_messages.append(msg)
+        
+        # 合并所有system消息
+        system_content = "\n".join(system_messages) if system_messages else ""
+        
+        return system_content, filtered_messages
 
     async def chat(
         self,
@@ -72,14 +101,22 @@ class ClaudeProvider(LLMProvider):
     ) -> str:
         """发送聊天请求"""
         try:
-            response = await self.client.messages.create(
-                model=self.default_model,
-                messages=messages,
-                max_tokens=self._get_max_tokens(max_tokens),
-                temperature=self._get_temperature(temperature),
-            )
+            system_content, filtered_messages = self._process_messages(messages)
+            
+            kwargs = {
+                "model": self.default_model,
+                "messages": filtered_messages,
+                "max_tokens": self._get_max_tokens(max_tokens),
+                "temperature": self._get_temperature(temperature),
+            }
+            
+            if system_content:
+                kwargs["system"] = system_content
+            
+            response = await self.client.messages.create(**kwargs)
             return response.content[0].text
         except Exception as e:
+            print(f"Claude API error: {e}; {self._diagnostics()}")
             raise RuntimeError(f"Claude API error: {e}")
 
     async def stream_chat(
@@ -90,15 +127,23 @@ class ClaudeProvider(LLMProvider):
     ) -> AsyncIterator[str]:
         """流式聊天"""
         try:
-            async with self.client.messages.stream(
-                model=self.default_model,
-                messages=messages,
-                max_tokens=self._get_max_tokens(max_tokens),
-                temperature=self._get_temperature(temperature),
-            ) as stream:
+            system_content, filtered_messages = self._process_messages(messages)
+            
+            kwargs = {
+                "model": self.default_model,
+                "messages": filtered_messages,
+                "max_tokens": self._get_max_tokens(max_tokens),
+                "temperature": self._get_temperature(temperature),
+            }
+            
+            if system_content:
+                kwargs["system"] = system_content
+            
+            async with self.client.messages.stream(**kwargs) as stream:
                 async for text in stream.text_stream:
                     yield text
         except Exception as e:
+            print(f"Claude streaming error: {e}; {self._diagnostics()}")
             raise RuntimeError(f"Claude streaming error: {e}")
 
 

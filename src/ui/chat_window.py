@@ -28,6 +28,7 @@ class ChatWindow(QMainWindow):
         super().__init__(parent)
         self.agent = agent
         self.chat_worker: Optional[ChatWorker] = None
+        self._is_assistant_label_added = False
         self._init_ui()
 
     def _init_ui(self) -> None:
@@ -152,6 +153,7 @@ class ChatWindow(QMainWindow):
 
     def _start_chat_worker(self, message: str) -> None:
         """启动聊天工作线程"""
+        self._is_assistant_label_added = False
         self.chat_worker = ChatWorker(self.agent, message, stream=True)
         self.chat_worker.stream_chunk.connect(self._on_stream_chunk)
         self.chat_worker.response_received.connect(self._on_response_received)
@@ -163,6 +165,17 @@ class ChatWindow(QMainWindow):
         """处理流式响应"""
         cursor = self.chat_history.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
+        
+        # 如果是第一个chunk，先添加ASSISTANT标签
+        if not self._is_assistant_label_added:
+            cursor.insertBlock()
+            format = QTextCharFormat()
+            format.setBackground(QColor("#f3f4f6"))
+            format.setForeground(QColor("#1f2937"))
+            cursor.setCharFormat(format)
+            cursor.insertText("ASSISTANT: ")
+            self._is_assistant_label_added = True
+        
         cursor.insertText(chunk)
         self.chat_history.setTextCursor(cursor)
         self.chat_history.ensureCursorVisible()

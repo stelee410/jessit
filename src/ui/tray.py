@@ -71,6 +71,15 @@ class JessitTray(QObject):
         icon = QIcon(pixmap)
         self.tray_icon.setIcon(icon)
         self.tray_icon.setToolTip("Jessit - AI Desktop Agent")
+        
+        # 连接激活信号，处理双击事件
+        self.tray_icon.activated.connect(self._on_tray_activated)
+
+    def _on_tray_activated(self, reason):
+        """处理托盘图标激活事件"""
+        # 双击时打开聊天窗口
+        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            self.show_chat.emit()
 
     def show(self):
         """显示托盘图标"""

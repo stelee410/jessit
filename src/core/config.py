@@ -5,6 +5,17 @@
 import os
 from typing import Optional
 
+from src.core.llm import LLMConfig
+
+
+def _load_env() -> None:
+    """加载.env文件（如果可用）"""
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
+
 
 def load_api_key() -> Optional[str]:
     """
@@ -15,22 +26,8 @@ def load_api_key() -> Optional[str]:
     Returns:
         API Key字符串，如果未找到则返回None
     """
-    # 首先尝试从环境变量读取
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    
-    if api_key:
-        return api_key
-    
-    # 尝试从.env文件加载
-    try:
-        from dotenv import load_dotenv
-        load_dotenv()
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-        return api_key
-    except ImportError:
-        pass
-    
-    return None
+    _load_env()
+    return os.environ.get("ANTHROPIC_API_KEY")
 
 
 def validate_api_key(api_key: Optional[str]) -> str:
@@ -53,3 +50,19 @@ def validate_api_key(api_key: Optional[str]) -> str:
         raise SystemExit(1)
     
     return api_key
+
+
+def build_llm_config(api_key: str) -> LLMConfig:
+    """
+    构建LLM配置（支持从环境变量读取Anthropic配置）
+
+    Args:
+        api_key: 已验证的API Key
+
+    Returns:
+        LLMConfig实例
+    """
+    _load_env()
+    base_url = os.environ.get("ANTHROPIC_BASE_URL") or None
+    model = os.environ.get("ANTHROPIC_DEFAULT_SONNET_MODEL") or None
+    return LLMConfig(api_key=api_key, base_url=base_url, model=model)
