@@ -79,21 +79,71 @@ class JessitAgent:
         # 添加用户消息到上下文
         self.context.add_message("user", user_message)
 
-        # 构建消息列表，包含可用的tools
+        # 构建消息列表
         messages = [{"role": "system", "content": self.system_prompt}]
         messages.extend(self.context.get_messages())
 
-        # 添加可用工具信息
-        if available_tools:
-            tools_info = "\n\n可用工具:\n"
-            for tool_name, tool_desc in available_tools.items():
-                tools_info += f"- {tool_name}: {tool_desc}\n"
-            messages[-1]["content"] += tools_info
+        # 获取可用的 skills
+        tools = self.skill_manager.get_skills_for_llm()
 
         try:
-            response = await self.llm.chat(messages)
-            self.context.add_message("assistant", response)
-            return response
+            # 第一步：调用 LLM
+            response = await self.llm.chat(messages, tools=tools)
+
+            # 处理工具调用响应
+            max_iterations = 10  # 防止无限循环
+            iteration = 0
+
+            while isinstance(response, dict) and response.get("type") == "tool_use" and iteration < max_iterations:
+                iteration += 1
+                tool_calls = response["tool_calls"]
+
+                # 执行每个工具调用
+                tool_results = []
+                for tool_call in tool_calls:
+                    tool_name = tool_call["name"]
+                    tool_args = tool_call["input"]
+
+                    # 添加工具调用消息到上下文
+                    messages.append({
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": tool_call["id"],
+                                "name": tool_name,
+                                "input": tool_args,
+                            }
+                        ],
+                    })
+
+                    # 执行工具
+                    result = self.skill_manager.execute_skill(tool_name, tool_args)
+
+                    # 添加工具结果消息到上下文
+                    messages.append({
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": tool_call["id"],
+                                "content": str(result),
+                            }
+                        ],
+                    })
+
+                    tool_results.append(result)
+
+                # 再次调用 LLM 获取最终响应
+                response = await self.llm.chat(messages, tools=tools)
+
+            # 如果是文本响应，添加到上下文
+            if isinstance(response, str):
+                self.context.add_message("assistant", response)
+                return response
+            else:
+                # 如果仍然是工具调用（超过最大迭代次数），返回错误
+                return "错误：工具调用超过最大迭代次数"
 
         except Exception as e:
             error_message = f"发生错误: {str(e)}"

@@ -46,16 +46,27 @@ class ChatWorker(QThread):
             await self._normal_chat()
 
     async def _stream_chat(self) -> None:
-        """流式聊天"""
-        full_response = ""
-        async for chunk in self.agent.chat(self.user_message, stream=True):
-            full_response += chunk
+        """流式聊天（使用工具调用，失去实时流式效果但支持工具）"""
+        # 由于工具调用需要完整响应，这里使用 chat_with_tools
+        response = await self.agent.chat_with_tools(self.user_message)
+
+        # 模拟流式输出（一次性发送完整响应）
+        full_response = response
+        # 可以将响应分块发送来模拟流式效果
+        for chunk in self._chunk_text(response, chunk_size=2):
             self.stream_chunk.emit(chunk)
+            # 短暂延迟模拟流式效果
+            import asyncio
+            await asyncio.sleep(0.01)
+
         self.response_received.emit(full_response)
 
+    def _chunk_text(self, text: str, chunk_size: int = 2) -> list:
+        """将文本分块用于模拟流式输出"""
+        return [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
+
     async def _normal_chat(self) -> None:
-        """普通聊天"""
-        response = ""
-        async for r in self.agent.chat(self.user_message, stream=False):
-            response = r
+        """普通聊天（带工具调用）"""
+        # 使用 chat_with_tools 支持工具调用
+        response = await self.agent.chat_with_tools(self.user_message)
         self.response_received.emit(response)

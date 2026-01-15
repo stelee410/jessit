@@ -3,7 +3,7 @@ LLM接口抽象和实现
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, AsyncIterator, Optional
+from typing import List, Dict, Any, AsyncIterator, Optional, Union
 from dataclasses import dataclass
 import anthropic
 import openai
@@ -33,7 +33,8 @@ class LLMProvider(ABC):
         messages: List[Dict[str, str]],
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
-    ) -> str:
+        tools: Optional[List[Dict[str, Any]]] = None,
+    ) -> Union[str, Dict[str, Any]]:
         """聊天接口"""
         pass
 
@@ -98,22 +99,44 @@ class ClaudeProvider(LLMProvider):
         messages: List[Dict[str, str]],
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
-    ) -> str:
+        tools: Optional[List[Dict[str, Any]]] = None,
+    ) -> Union[str, Dict[str, Any]]:
         """发送聊天请求"""
         try:
             system_content, filtered_messages = self._process_messages(messages)
-            
+
             kwargs = {
                 "model": self.default_model,
                 "messages": filtered_messages,
                 "max_tokens": self._get_max_tokens(max_tokens),
                 "temperature": self._get_temperature(temperature),
             }
-            
+
             if system_content:
                 kwargs["system"] = system_content
-            
+
+            if tools:
+                kwargs["tools"] = tools
+
             response = await self.client.messages.create(**kwargs)
+
+            # 检查是否有 tool_use 响应
+            tool_use_blocks = [block for block in response.content if block.type == "tool_use"]
+            if tool_use_blocks:
+                # 返回工具调用信息
+                tool_calls = []
+                for block in tool_use_blocks:
+                    tool_calls.append({
+                        "id": block.id,
+                        "name": block.name,
+                        "input": block.input,
+                    })
+                return {
+                    "type": "tool_use",
+                    "tool_calls": tool_calls,
+                }
+
+            # 返回文本响应
             return response.content[0].text
         except Exception as e:
             print(f"Claude API error: {e}; {self._diagnostics()}")
@@ -163,7 +186,8 @@ class OpenAIProvider(LLMProvider):
         messages: List[Dict[str, str]],
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
-    ) -> str:
+        tools: Optional[List[Dict[str, Any]]] = None,
+    ) -> Union[str, Dict[str, Any]]:
         """发送聊天请求"""
         try:
             response = await self.client.chat.completions.create(
@@ -211,7 +235,8 @@ class OllamaProvider(LLMProvider):
         messages: List[Dict[str, str]],
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
-    ) -> str:
+        tools: Optional[List[Dict[str, Any]]] = None,
+    ) -> Union[str, Dict[str, Any]]:
         """发送聊天请求"""
         import aiohttp
 

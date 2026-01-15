@@ -2,7 +2,13 @@
   "permissions": {
     "allow": [
       "Bash(mkdir:*)",
-      "Bash(./venv/Scripts/python.exe:*)"
+      "Bash(./venv/Scripts/python.exe:*)",
+      "Bash(python:*)",
+      "Bash(\"D:\\\\dev\\\\jessit\\\\venv\\\\Scripts\\\\python.exe\" -c \"import sys; sys.path.insert\\(0, ''.''\\); from src.core.skill_manager import SkillManager; sm = SkillManager\\(''skills''\\); print\\(''Skills loaded:''\\); [print\\(f''- {s.name}: {s.module_path}''\\) for s in sm.list_skills\\(\\)]\")",
+      "Bash(\"D:\\\\dev\\\\jessit\\\\venv\\\\Scripts\\\\python.exe\" -c \"import sys; sys.path.insert\\(0, ''.''\\); from src.core.skill_manager import SkillManager; sm = SkillManager\\(''skills''\\); result = sm.execute_skill\\(''write_file'', {''file_path'': ''Desktop/jessit_test.txt'', ''content'': ''hello world''}\\); print\\(result\\)\")",
+      "Bash(\"D:\\\\dev\\\\jessit\\\\venv\\\\Scripts\\\\python.exe\" -c \"import sys; sys.path.insert\\(0, ''.''\\); from skills.file_operations.write_file import resolve_path; print\\(resolve_path\\(''Desktop/jessit_test.txt''\\)\\)\")",
+      "Bash(\"D:\\\\dev\\\\jessit\\\\venv\\\\Scripts\\\\python.exe\":*)",
+      "Bash(\"D:\\\\dev\\\\jessit\\\\venv\\\\Scripts\\\\python.exe\" -c \"import sys; sys.path.insert\\(0, ''.''\\); from src.core.skill_manager import SkillManager; sm = SkillManager\\(''skills''\\); result = sm.execute_skill\\(''read_file'', {''file_path'': ''Desktop/jessit_test.txt''}\\); print\\(result\\)\")"
     ]
   }
 }
