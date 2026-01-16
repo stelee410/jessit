@@ -25,3 +25,6 @@ python-dotenv>=1.0.0
 # 桌面自动化
 mss>=9.0.1
 Pillow>=10.0.0
+
+# 浏览器自动化
+playwright>=1.40.0

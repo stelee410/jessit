@@ -1,0 +1,54 @@
+{
+  "name": "market_pulse_observer",
+  "description": "市场脉搏观察者 - 自动收集和分析多个网站的趋势数据，跟踪叙事转变和信号强度",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "schedule": {
+        "type": "string",
+        "description": "执行计划：'manual'（手动）、'daily'（每日）或 'weekly'（每周）",
+        "enum": ["manual", "daily", "weekly"],
+        "default": "manual"
+      },
+      "sources": {
+        "type": "object",
+        "description": "数据源配置",
+        "properties": {
+          "x_trending": {
+            "type": "boolean",
+            "description": "是否收集 X.com 趋势数据",
+            "default": true
+          },
+          "financial_news": {
+            "type": "boolean",
+            "description": "是否收集金融新闻首页数据",
+            "default": true
+          },
+          "ai_media": {
+            "type": "boolean",
+            "description": "是否收集 AI 特定媒体数据",
+            "default": false
+          }
+        },
+        "default": {
+          "x_trending": true,
+          "financial_news": true,
+          "ai_media": false
+        }
+      },
+      "output_path": {
+        "type": "string",
+        "description": "报告输出路径（可选，默认为桌面）",
+        "default": "桌面/market_pulse_reports"
+      }
+    },
+    "required": []
+  },
+  "handler": "market_pulse.observe",
+  "enabled": true,
+  "metadata": {
+    "category": "data_collection",
+    "requires_browser": true,
+    "execution_time": "5-15 minutes"
+  }
+}
