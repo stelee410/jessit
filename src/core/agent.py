@@ -3,12 +3,12 @@ Jessit Agent主控模块
 """
 
 import asyncio
-import re
-from pathlib import Path
-from typing import Dict, Any, Optional, Callable, Tuple
+from typing import Dict, Any, Optional, Callable
 from .llm import LLMProvider, LLMConfig, create_llm_provider
 from .context import ConversationContext
 from .skill_manager import SkillManager
+from .prompts import build_system_prompt
+from .safety import is_dangerous_operation
 
 
 class JessitAgent:
@@ -20,62 +20,13 @@ class JessitAgent:
         provider_type: str = "claude",
         skills_dir: str = "skills",
         confirmation_callback: Optional[Callable[[str, str], bool]] = None,
+        experience_file: Optional[str] = None,
     ):
         self.llm: LLMProvider = create_llm_provider(provider_type, llm_config)
         self.context: ConversationContext = ConversationContext()
         self.skill_manager: SkillManager = SkillManager(skills_dir)
         self.confirmation_callback: Optional[Callable[[str, str], bool]] = confirmation_callback
-        self._initialize_system_prompt()  # 内部会调用_load_experience()
-
-    def _initialize_system_prompt(self) -> None:
-        """初始化系统提示"""
-        base_prompt = """你是Jessit，一个运行在Windows系统上的AI桌面助手。
-
-你的能力包括：
-1. 执行PowerShell命令
-2. 操作本地文件系统
-3. 处理Excel文件
-4. 通过Chrome扩展抓取网页数据
-5. 控制鼠标和键盘（在必要时）
-6. 调用各种预定义的skills
-
-请使用自然语言与用户交流，根据用户的需求选择最合适的方式完成任务。
-当需要执行危险操作时（如删除文件），请先向用户确认。"""
-        
-        # 加载经验文档并合并到系统提示
-        experience_content = self._load_experience()
-        if experience_content:
-            self.system_prompt = f"""{base_prompt}
-
-以下是之前的经验总结，请参考这些经验来更好地完成任务：
-{experience_content}"""
-        else:
-            self.system_prompt = base_prompt
-    
-    def _load_experience(self) -> str:
-        """加载经验文档jessit.txt
-        
-        Returns:
-            经验内容字符串，如果文件不存在或读取失败则返回空字符串
-        """
-        try:
-            # 尝试从当前工作目录读取jessit.txt
-            experience_file = Path("jessit.txt")
-            if experience_file.exists():
-                with open(experience_file, "r", encoding="utf-8") as f:
-                    experience_content = f.read().strip()
-                    if experience_content:
-                        print(f"已加载经验文档: {experience_file}")
-                        return experience_content
-                    else:
-                        print(f"经验文档为空: {experience_file}")
-                        return ""
-            else:
-                print(f"经验文档不存在: {experience_file}，将创建新文件")
-                return ""
-        except Exception as e:
-            print(f"加载经验文档失败: {e}")
-            return ""
+        self.system_prompt = build_system_prompt(experience_file)
 
     async def chat(
         self, user_message: str, stream: bool = False
@@ -109,41 +60,6 @@ class JessitAgent:
             self.context.add_message("assistant", error_message)
             yield error_message
 
-    def _is_dangerous_operation(self, tool_name: str, tool_args: Dict[str, Any]) -> Tuple[bool, str]:
-        """
-        检测是否为危险操作
-        
-        Args:
-            tool_name: 工具名称
-            tool_args: 工具参数
-            
-        Returns:
-            (是否为危险操作, 危险操作描述)
-        """
-        # 检测删除文件的操作（通过PowerShell命令）
-        if tool_name == "execute_powershell":
-            command = tool_args.get("command", "").strip()
-            # 检测删除命令
-            delete_patterns = [
-                r'\bRemove-Item\b',
-                r'\brm\b',
-                r'\bdel\s',
-                r'\berase\s',
-                r'\brmdir\s',
-                r'\bRemove-Item\s+-Force\b',
-                r'\bRemove-Item\s+-Recurse\b',
-            ]
-            for pattern in delete_patterns:
-                if re.search(pattern, command, re.IGNORECASE):
-                    # 提取要删除的文件路径（简单匹配）
-                    path_match = re.search(r'["\']([^"\']+)["\']|(-Path|--Path)\s+([^\s]+)', command, re.IGNORECASE)
-                    target = path_match.group(1) if path_match else (path_match.group(3) if path_match else "文件")
-                    return True, f"执行删除操作: {command}"
-        
-        # 检测其他危险操作可以在这里添加
-        # 例如：格式化磁盘、修改系统配置等
-        
-        return False, ""
     
     async def chat_with_tools(
         self,
@@ -230,7 +146,7 @@ class JessitAgent:
                     tool_args = tool_call["input"]
 
                     # 检测危险操作
-                    is_dangerous, danger_description = self._is_dangerous_operation(tool_name, tool_args)
+                    is_dangerous, danger_description = is_dangerous_operation(tool_name, tool_args)
                     if is_dangerous:
                         # 如果检测到危险操作，先请求用户确认
                         if self.confirmation_callback:

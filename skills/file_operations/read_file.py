@@ -3,7 +3,7 @@
 """
 
 from typing import Dict, Any
-from .write_file import resolve_path
+from src.utils.path_utils import resolve_path
 
 
 def read_file(file_path: str, encoding: str = "utf-8") -> Dict[str, Any]:

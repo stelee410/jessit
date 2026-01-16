@@ -10,21 +10,20 @@ from PyQt6.QtWidgets import (
     QTextEdit,
     QLineEdit,
     QPushButton,
-    QLabel,
-    QScrollArea,
-    QFrame,
-    QSizePolicy,
-    QMessageBox,
-    QDialog,
 )
-from PyQt6.QtCore import Qt, pyqtSlot, QSize, QEventLoop, QTimer
+from PyQt6.QtCore import pyqtSlot
 from PyQt6.QtGui import QTextCursor, QTextCharFormat, QColor
 from typing import Optional
-import json
-import queue
-import threading
 
 from src.ui.workers import ChatWorker
+from src.ui.styles import (
+    get_input_style,
+    get_button_style,
+    get_detail_button_style,
+    get_save_button_style,
+)
+from src.ui.detail_panel import DetailPanel
+from src.ui.confirmation import ConfirmationHandler
 
 
 
@@ -43,8 +42,8 @@ class ChatWindow(QMainWindow):
             "execution_steps": [],
             "final_result": "",
         }
-        # 用于线程间通信的队列
-        self.confirmation_queue: queue.Queue = queue.Queue()
+        # 创建确认处理器
+        self.confirmation_handler = ConfirmationHandler(self)
         self._init_ui()
         # 设置agent的确认回调
         self._setup_confirmation_callback()
@@ -75,14 +74,14 @@ class ChatWindow(QMainWindow):
         # 创建详情按钮区域
         detail_button_layout = QHBoxLayout()
         self.detail_button = QPushButton("查看处理详情")
-        self.detail_button.setStyleSheet(self._get_detail_button_style())
+        self.detail_button.setStyleSheet(get_detail_button_style())
         self.detail_button.clicked.connect(self._toggle_detail_panel)
         detail_button_layout.addWidget(self.detail_button)
         detail_button_layout.addStretch()
         parent_layout.addLayout(detail_button_layout)
         
         # 创建详情面板（初始隐藏）
-        self.detail_panel = self._create_detail_panel()
+        self.detail_panel = DetailPanel(self)
         self.detail_panel.setVisible(False)
         parent_layout.addWidget(self.detail_panel)
         
@@ -91,99 +90,23 @@ class ChatWindow(QMainWindow):
         
         self.input_field = QLineEdit()
         self.input_field.setPlaceholderText("输入你的问题... (按Enter发送)")
-        self.input_field.setStyleSheet(self._get_input_style())
+        self.input_field.setStyleSheet(get_input_style())
         self.input_field.returnPressed.connect(self._send_message)
         input_layout.addWidget(self.input_field)
 
         save_button = QPushButton("保存")
-        save_button.setStyleSheet(self._get_save_button_style())
+        save_button.setStyleSheet(get_save_button_style())
         save_button.clicked.connect(self._on_save_clicked)
         save_button.setToolTip("保存当前工作为经验到jessit.txt")
         input_layout.addWidget(save_button)
 
         send_button = QPushButton("发送")
-        send_button.setStyleSheet(self._get_button_style())
+        send_button.setStyleSheet(get_button_style())
         send_button.clicked.connect(self._send_message)
         input_layout.addWidget(send_button)
 
         parent_layout.addLayout(input_layout)
 
-    def _get_input_style(self) -> str:
-        """获取输入框样式"""
-        return """
-            QLineEdit {
-                padding: 10px;
-                border: 2px solid #e5e7eb;
-                border-radius: 10px;
-                font-size: 14px;
-            }
-            QLineEdit:focus {
-                border: 2px solid #6366f1;
-            }
-        """
-
-    def _get_button_style(self) -> str:
-        """获取按钮样式"""
-        return """
-            QPushButton {
-                background-color: #6366f1;
-                color: white;
-                padding: 10px 20px;
-                border: none;
-                border-radius: 10px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #4f46e5;
-            }
-            QPushButton:pressed {
-                background-color: #4338ca;
-            }
-            QPushButton:disabled {
-                background-color: #9ca3af;
-            }
-        """
-    
-    def _get_detail_button_style(self) -> str:
-        """获取详情按钮样式"""
-        return """
-            QPushButton {
-                background-color: #10b981;
-                color: white;
-                padding: 8px 16px;
-                border: none;
-                border-radius: 8px;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #059669;
-            }
-            QPushButton:pressed {
-                background-color: #047857;
-            }
-            QPushButton:disabled {
-                background-color: #9ca3af;
-            }
-        """
-    
-    def _get_save_button_style(self) -> str:
-        """获取保存按钮样式"""
-        return """
-            QPushButton {
-                background-color: #f59e0b;
-                color: white;
-                padding: 10px 20px;
-                border: none;
-                border-radius: 10px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #d97706;
-            }
-            QPushButton:pressed {
-                background-color: #b45309;
-            }
-        """
 
     def _show_welcome_message(self) -> None:
         """显示欢迎消息"""
@@ -244,7 +167,7 @@ class ChatWindow(QMainWindow):
         }
         # 如果详情面板是展开的，更新显示（显示重置后的状态）
         if self.detail_panel.isVisible():
-            self._update_detail_panel()
+            self.detail_panel.update_progress_info(self.current_progress_info)
         self.chat_worker = ChatWorker(self.agent, message, stream=True, chat_window=self)
         self.chat_worker.stream_chunk.connect(self._on_stream_chunk)
         self.chat_worker.response_received.connect(self._on_response_received)
@@ -252,7 +175,7 @@ class ChatWindow(QMainWindow):
         self.chat_worker.progress_updated.connect(self._on_progress_updated)
         self.chat_worker.start()
         # 启动确认队列处理器（定期检查队列）
-        self._start_confirmation_processor()
+        self.confirmation_handler.start_confirmation_processor()
 
     @pyqtSlot(str)
     def _on_stream_chunk(self, chunk: str) -> None:
@@ -281,7 +204,7 @@ class ChatWindow(QMainWindow):
         self._append_newline()
         # 如果详情面板是展开的，更新显示最终结果
         if self.detail_panel.isVisible():
-            self._update_detail_panel()
+            self.detail_panel.update_progress_info(self.current_progress_info)
 
     def _append_newline(self) -> None:
         """添加换行"""
@@ -324,182 +247,12 @@ class ChatWindow(QMainWindow):
         self.activateWindow()
         self.raise_()
         self.input_field.setFocus()
-    
-    def _create_detail_panel(self) -> QWidget:
-        """创建详情面板"""
-        panel = QFrame()
-        panel.setFrameStyle(QFrame.Shape.StyledPanel)
-        panel.setStyleSheet("""
-            QFrame {
-                background-color: #f9fafb;
-                border: 1px solid #e5e7eb;
-                border-radius: 8px;
-                padding: 10px;
-            }
-        """)
-        panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        
-        layout = QVBoxLayout(panel)
-        layout.setSpacing(10)
-        
-        # 标题
-        title_label = QLabel("AI处理详情")
-        title_label.setStyleSheet("""
-            QLabel {
-                font-size: 16px;
-                font-weight: bold;
-                color: #1f2937;
-                padding: 5px 0;
-            }
-        """)
-        layout.addWidget(title_label)
-        
-        # 滚动区域
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setStyleSheet("""
-            QScrollArea {
-                border: none;
-                background-color: transparent;
-            }
-        """)
-        
-        content_widget = QWidget()
-        content_layout = QVBoxLayout(content_widget)
-        content_layout.setSpacing(15)
-        
-        # 任务分析区域
-        self.analysis_label = QLabel("任务分析：")
-        self.analysis_label.setStyleSheet("font-weight: bold; color: #374151;")
-        self.analysis_text = QTextEdit()
-        self.analysis_text.setReadOnly(True)
-        self.analysis_text.setMaximumHeight(100)
-        self.analysis_text.setStyleSheet("""
-            QTextEdit {
-                background-color: white;
-                border: 1px solid #d1d5db;
-                border-radius: 4px;
-                padding: 8px;
-                font-size: 12px;
-            }
-        """)
-        content_layout.addWidget(self.analysis_label)
-        content_layout.addWidget(self.analysis_text)
-        
-        # 计划区域
-        self.plan_label = QLabel("执行计划：")
-        self.plan_label.setStyleSheet("font-weight: bold; color: #374151;")
-        self.plan_text = QTextEdit()
-        self.plan_text.setReadOnly(True)
-        self.plan_text.setMaximumHeight(150)
-        self.plan_text.setStyleSheet("""
-            QTextEdit {
-                background-color: white;
-                border: 1px solid #d1d5db;
-                border-radius: 4px;
-                padding: 8px;
-                font-size: 12px;
-            }
-        """)
-        content_layout.addWidget(self.plan_label)
-        content_layout.addWidget(self.plan_text)
-        
-        # 实施步骤区域
-        self.steps_label = QLabel("实施步骤：")
-        self.steps_label.setStyleSheet("font-weight: bold; color: #374151;")
-        self.steps_text = QTextEdit()
-        self.steps_text.setReadOnly(True)
-        self.steps_text.setMaximumHeight(200)
-        self.steps_text.setStyleSheet("""
-            QTextEdit {
-                background-color: white;
-                border: 1px solid #d1d5db;
-                border-radius: 4px;
-                padding: 8px;
-                font-size: 12px;
-            }
-        """)
-        content_layout.addWidget(self.steps_label)
-        content_layout.addWidget(self.steps_text)
-        
-        # 结果区域
-        self.result_label = QLabel("最终结果：")
-        self.result_label.setStyleSheet("font-weight: bold; color: #374151;")
-        self.result_text = QTextEdit()
-        self.result_text.setReadOnly(True)
-        self.result_text.setMaximumHeight(100)
-        self.result_text.setStyleSheet("""
-            QTextEdit {
-                background-color: white;
-                border: 1px solid #d1d5db;
-                border-radius: 4px;
-                padding: 8px;
-                font-size: 12px;
-            }
-        """)
-        content_layout.addWidget(self.result_label)
-        content_layout.addWidget(self.result_text)
-        
-        content_layout.addStretch()
-        
-        scroll_area.setWidget(content_widget)
-        layout.addWidget(scroll_area)
-        
-        return panel
-    
     def _toggle_detail_panel(self) -> None:
         """切换详情面板显示/隐藏"""
         is_visible = self.detail_panel.isVisible()
         self.detail_panel.setVisible(not is_visible)
         if not is_visible:
-            self._update_detail_panel()
-    
-    def _update_detail_panel(self) -> None:
-        """更新详情面板内容"""
-        # 更新任务分析
-        analysis = self.current_progress_info.get("analysis", "")
-        if analysis:
-            self.analysis_text.setPlainText(analysis)
-        else:
-            self.analysis_text.setPlainText("正在分析任务...")
-        
-        # 更新计划
-        plan = self.current_progress_info.get("plan", [])
-        if plan:
-            plan_text = ""
-            for i, step in enumerate(plan, 1):
-                tool_name = step.get("tool_name", "未知工具")
-                tool_args = step.get("tool_args", {})
-                plan_text += f"步骤 {i}: 调用工具 {tool_name}\n"
-                plan_text += f"  参数: {json.dumps(tool_args, ensure_ascii=False, indent=2)}\n\n"
-            self.plan_text.setPlainText(plan_text)
-        else:
-            self.plan_text.setPlainText("正在制定执行计划...")
-        
-        # 更新实施步骤
-        steps = self.current_progress_info.get("execution_steps", [])
-        if steps:
-            steps_text = ""
-            for i, step in enumerate(steps, 1):
-                tool_name = step.get("tool_name", "未知工具")
-                tool_args = step.get("tool_args", {})
-                result = step.get("result", {})
-                status = step.get("status", "unknown")
-                status_text = "✓ 成功" if status == "completed" else "✗ 失败"
-                
-                steps_text += f"步骤 {i}: {tool_name} - {status_text}\n"
-                steps_text += f"  参数: {json.dumps(tool_args, ensure_ascii=False, indent=2)}\n"
-                steps_text += f"  结果: {json.dumps(result, ensure_ascii=False, indent=2)}\n\n"
-            self.steps_text.setPlainText(steps_text)
-        else:
-            self.steps_text.setPlainText("等待执行步骤...")
-        
-        # 更新最终结果
-        result = self.current_progress_info.get("final_result", "")
-        if result:
-            self.result_text.setPlainText(result)
-        else:
-            self.result_text.setPlainText("正在处理，请稍候...")
+            self.detail_panel.update_progress_info(self.current_progress_info)
     
     @pyqtSlot(dict)
     def _on_progress_updated(self, progress_data: dict) -> None:
@@ -524,88 +277,9 @@ class ChatWindow(QMainWindow):
         
         # 如果详情面板可见，实时更新
         if self.detail_panel.isVisible():
-            self._update_detail_panel()
-    
-    def request_confirmation(self, tool_name: str, operation_description: str) -> bool:
-        """
-        请求用户确认危险操作（在UI线程中调用）
-        
-        Args:
-            tool_name: 工具名称
-            operation_description: 操作描述
-            
-        Returns:
-            True 如果用户确认，False 如果用户取消
-        """
-        # 显示确认对话框
-        reply = QMessageBox.question(
-            self,
-            "确认危险操作",
-            f"检测到危险操作：{operation_description}\n\n工具：{tool_name}\n\n是否确认执行此操作？",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No  # 默认选择"否"以更安全
-        )
-        
-        return reply == QMessageBox.StandardButton.Yes
-    
-    def _start_confirmation_processor(self) -> None:
-        """启动确认队列处理器"""
-        # 创建一个定时器来定期处理确认队列
-        if not hasattr(self, '_confirmation_timer'):
-            self._confirmation_timer = QTimer(self)
-            self._confirmation_timer.timeout.connect(self._process_confirmation_queue)
-            self._confirmation_timer.start(100)  # 每100ms检查一次
+            self.detail_panel.update_progress_info(self.current_progress_info)
     
     def _setup_confirmation_callback(self) -> None:
         """设置agent的确认回调"""
-        def confirmation_callback(tool_name: str, operation_description: str) -> bool:
-            """
-            确认回调函数（可能在工作线程中调用）
-            通过队列在主线程中请求确认
-            """
-            # 创建一个事件来等待响应
-            response_event = threading.Event()
-            result_container = {"result": False}
-            
-            # 将确认请求放入队列，在主线程中处理
-            self.confirmation_queue.put({
-                "tool_name": tool_name,
-                "operation_description": operation_description,
-                "response_event": response_event,
-                "result_container": result_container,
-            })
-            
-            # 使用QTimer在主线程中处理确认请求
-            QTimer.singleShot(0, self._process_confirmation_queue)
-            
-            # 等待主线程的响应（最多等待60秒）
-            if response_event.wait(timeout=60):
-                return result_container["result"]
-            else:
-                # 超时，默认拒绝
-                return False
-        
         if self.agent:
-            self.agent.confirmation_callback = confirmation_callback
-    
-    def _process_confirmation_queue(self) -> None:
-        """处理确认队列中的请求（在主线程中调用）"""
-        try:
-            while True:
-                try:
-                    request = self.confirmation_queue.get_nowait()
-                    tool_name = request["tool_name"]
-                    operation_description = request["operation_description"]
-                    response_event = request["response_event"]
-                    result_container = request["result_container"]
-                    
-                    # 显示确认对话框
-                    result = self.request_confirmation(tool_name, operation_description)
-                    result_container["result"] = result
-                    response_event.set()
-                except queue.Empty:
-                    break
-        except Exception as e:
-            print(f"处理确认队列时出错: {e}")
-            import traceback
-            traceback.print_exc()
+            self.agent.confirmation_callback = self.confirmation_handler.create_confirmation_callback()
