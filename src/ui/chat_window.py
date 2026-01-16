@@ -34,7 +34,8 @@ class ChatWindow(QMainWindow):
     def _init_ui(self) -> None:
         """初始化UI"""
         self.setWindowTitle("Jessit - AI Desktop Agent")
-        self.setMinimumSize(600, 500)
+        self.setMinimumSize(800, 600)
+        self.resize(900, 700)
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
