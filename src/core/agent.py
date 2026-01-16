@@ -3,8 +3,9 @@ Jessit Agent主控模块
 """
 
 import asyncio
+import re
 from pathlib import Path
-from typing import Dict, Any, Optional, Callable
+from typing import Dict, Any, Optional, Callable, Tuple
 from .llm import LLMProvider, LLMConfig, create_llm_provider
 from .context import ConversationContext
 from .skill_manager import SkillManager
@@ -18,10 +19,12 @@ class JessitAgent:
         llm_config: LLMConfig,
         provider_type: str = "claude",
         skills_dir: str = "skills",
+        confirmation_callback: Optional[Callable[[str, str], bool]] = None,
     ):
         self.llm: LLMProvider = create_llm_provider(provider_type, llm_config)
         self.context: ConversationContext = ConversationContext()
         self.skill_manager: SkillManager = SkillManager(skills_dir)
+        self.confirmation_callback: Optional[Callable[[str, str], bool]] = confirmation_callback
         self._initialize_system_prompt()  # 内部会调用_load_experience()
 
     def _initialize_system_prompt(self) -> None:
@@ -106,6 +109,42 @@ class JessitAgent:
             self.context.add_message("assistant", error_message)
             yield error_message
 
+    def _is_dangerous_operation(self, tool_name: str, tool_args: Dict[str, Any]) -> Tuple[bool, str]:
+        """
+        检测是否为危险操作
+        
+        Args:
+            tool_name: 工具名称
+            tool_args: 工具参数
+            
+        Returns:
+            (是否为危险操作, 危险操作描述)
+        """
+        # 检测删除文件的操作（通过PowerShell命令）
+        if tool_name == "execute_powershell":
+            command = tool_args.get("command", "").strip()
+            # 检测删除命令
+            delete_patterns = [
+                r'\bRemove-Item\b',
+                r'\brm\b',
+                r'\bdel\s',
+                r'\berase\s',
+                r'\brmdir\s',
+                r'\bRemove-Item\s+-Force\b',
+                r'\bRemove-Item\s+-Recurse\b',
+            ]
+            for pattern in delete_patterns:
+                if re.search(pattern, command, re.IGNORECASE):
+                    # 提取要删除的文件路径（简单匹配）
+                    path_match = re.search(r'["\']([^"\']+)["\']|(-Path|--Path)\s+([^\s]+)', command, re.IGNORECASE)
+                    target = path_match.group(1) if path_match else (path_match.group(3) if path_match else "文件")
+                    return True, f"执行删除操作: {command}"
+        
+        # 检测其他危险操作可以在这里添加
+        # 例如：格式化磁盘、修改系统配置等
+        
+        return False, ""
+    
     async def chat_with_tools(
         self,
         user_message: str,
@@ -189,6 +228,66 @@ class JessitAgent:
                 for tool_call in tool_calls:
                     tool_name = tool_call["name"]
                     tool_args = tool_call["input"]
+
+                    # 检测危险操作
+                    is_dangerous, danger_description = self._is_dangerous_operation(tool_name, tool_args)
+                    if is_dangerous:
+                        # 如果检测到危险操作，先请求用户确认
+                        if self.confirmation_callback:
+                            # 构建确认消息
+                            confirm_message = f"检测到危险操作：{danger_description}\n\n是否确认执行？"
+                            # 调用确认回调（这是同步调用，会在UI线程中阻塞等待用户响应）
+                            # 注意：由于这是在异步函数中，我们需要使用 asyncio.to_thread 来在主线程中执行
+                            # 但实际上，确认回调应该已经在主线程中执行，这里我们直接调用
+                            confirmed = self.confirmation_callback(tool_name, danger_description)
+                            if not confirmed:
+                                # 用户取消，返回取消消息
+                                result = {
+                                    "success": False,
+                                    "error": "用户取消了危险操作",
+                                    "tool_name": tool_name,
+                                    "tool_args": tool_args,
+                                }
+                                # 记录执行步骤（取消状态）
+                                execution_step = {
+                                    "tool_name": tool_name,
+                                    "tool_args": tool_args,
+                                    "result": result,
+                                    "status": "cancelled",
+                                }
+                                progress_info["execution_steps"].append(execution_step)
+                                
+                                if progress_callback:
+                                    progress_callback({
+                                        "stage": "step_complete",
+                                        "step": execution_step,
+                                    })
+                                
+                                # 添加工具结果消息到上下文（取消状态）
+                                messages.append({
+                                    "role": "assistant",
+                                    "content": [
+                                        {
+                                            "type": "tool_use",
+                                            "id": tool_call["id"],
+                                            "name": tool_name,
+                                            "input": tool_args,
+                                        }
+                                    ],
+                                })
+                                messages.append({
+                                    "role": "user",
+                                    "content": [
+                                        {
+                                            "type": "tool_result",
+                                            "tool_use_id": tool_call["id"],
+                                            "content": str(result),
+                                        }
+                                    ],
+                                })
+                                
+                                tool_results.append(result)
+                                continue
 
                     # 报告执行步骤
                     if progress_callback:

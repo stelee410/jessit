@@ -14,11 +14,15 @@ from PyQt6.QtWidgets import (
     QScrollArea,
     QFrame,
     QSizePolicy,
+    QMessageBox,
+    QDialog,
 )
-from PyQt6.QtCore import Qt, pyqtSlot, QSize
+from PyQt6.QtCore import Qt, pyqtSlot, QSize, QEventLoop, QTimer
 from PyQt6.QtGui import QTextCursor, QTextCharFormat, QColor
 from typing import Optional
 import json
+import queue
+import threading
 
 from src.ui.workers import ChatWorker
 
@@ -39,7 +43,11 @@ class ChatWindow(QMainWindow):
             "execution_steps": [],
             "final_result": "",
         }
+        # 用于线程间通信的队列
+        self.confirmation_queue: queue.Queue = queue.Queue()
         self._init_ui()
+        # 设置agent的确认回调
+        self._setup_confirmation_callback()
 
     def _init_ui(self) -> None:
         """初始化UI"""
@@ -237,12 +245,14 @@ class ChatWindow(QMainWindow):
         # 如果详情面板是展开的，更新显示（显示重置后的状态）
         if self.detail_panel.isVisible():
             self._update_detail_panel()
-        self.chat_worker = ChatWorker(self.agent, message, stream=True)
+        self.chat_worker = ChatWorker(self.agent, message, stream=True, chat_window=self)
         self.chat_worker.stream_chunk.connect(self._on_stream_chunk)
         self.chat_worker.response_received.connect(self._on_response_received)
         self.chat_worker.error_occurred.connect(self._on_error)
         self.chat_worker.progress_updated.connect(self._on_progress_updated)
         self.chat_worker.start()
+        # 启动确认队列处理器（定期检查队列）
+        self._start_confirmation_processor()
 
     @pyqtSlot(str)
     def _on_stream_chunk(self, chunk: str) -> None:
@@ -515,3 +525,87 @@ class ChatWindow(QMainWindow):
         # 如果详情面板可见，实时更新
         if self.detail_panel.isVisible():
             self._update_detail_panel()
+    
+    def request_confirmation(self, tool_name: str, operation_description: str) -> bool:
+        """
+        请求用户确认危险操作（在UI线程中调用）
+        
+        Args:
+            tool_name: 工具名称
+            operation_description: 操作描述
+            
+        Returns:
+            True 如果用户确认，False 如果用户取消
+        """
+        # 显示确认对话框
+        reply = QMessageBox.question(
+            self,
+            "确认危险操作",
+            f"检测到危险操作：{operation_description}\n\n工具：{tool_name}\n\n是否确认执行此操作？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No  # 默认选择"否"以更安全
+        )
+        
+        return reply == QMessageBox.StandardButton.Yes
+    
+    def _start_confirmation_processor(self) -> None:
+        """启动确认队列处理器"""
+        # 创建一个定时器来定期处理确认队列
+        if not hasattr(self, '_confirmation_timer'):
+            self._confirmation_timer = QTimer(self)
+            self._confirmation_timer.timeout.connect(self._process_confirmation_queue)
+            self._confirmation_timer.start(100)  # 每100ms检查一次
+    
+    def _setup_confirmation_callback(self) -> None:
+        """设置agent的确认回调"""
+        def confirmation_callback(tool_name: str, operation_description: str) -> bool:
+            """
+            确认回调函数（可能在工作线程中调用）
+            通过队列在主线程中请求确认
+            """
+            # 创建一个事件来等待响应
+            response_event = threading.Event()
+            result_container = {"result": False}
+            
+            # 将确认请求放入队列，在主线程中处理
+            self.confirmation_queue.put({
+                "tool_name": tool_name,
+                "operation_description": operation_description,
+                "response_event": response_event,
+                "result_container": result_container,
+            })
+            
+            # 使用QTimer在主线程中处理确认请求
+            QTimer.singleShot(0, self._process_confirmation_queue)
+            
+            # 等待主线程的响应（最多等待60秒）
+            if response_event.wait(timeout=60):
+                return result_container["result"]
+            else:
+                # 超时，默认拒绝
+                return False
+        
+        if self.agent:
+            self.agent.confirmation_callback = confirmation_callback
+    
+    def _process_confirmation_queue(self) -> None:
+        """处理确认队列中的请求（在主线程中调用）"""
+        try:
+            while True:
+                try:
+                    request = self.confirmation_queue.get_nowait()
+                    tool_name = request["tool_name"]
+                    operation_description = request["operation_description"]
+                    response_event = request["response_event"]
+                    result_container = request["result_container"]
+                    
+                    # 显示确认对话框
+                    result = self.request_confirmation(tool_name, operation_description)
+                    result_container["result"] = result
+                    response_event.set()
+                except queue.Empty:
+                    break
+        except Exception as e:
+            print(f"处理确认队列时出错: {e}")
+            import traceback
+            traceback.print_exc()

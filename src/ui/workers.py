@@ -17,8 +17,9 @@ class ChatWorker(QThread):
     stream_chunk = pyqtSignal(str)
     error_occurred = pyqtSignal(str)
     progress_updated = pyqtSignal(dict)  # 进度更新信号
+    confirmation_requested = pyqtSignal(str, str, object)  # 请求确认信号 (tool_name, description, callback)
 
-    def __init__(self, agent: "JessitAgent", user_message: str, stream: bool = False):
+    def __init__(self, agent: "JessitAgent", user_message: str, stream: bool = False, chat_window=None):
         """
         初始化聊天工作线程
         
@@ -31,6 +32,7 @@ class ChatWorker(QThread):
         self.agent = agent
         self.user_message = user_message
         self.stream = stream
+        self.chat_window = chat_window
         self.progress_info = {
             "analysis": "",
             "plan": [],

@@ -35,8 +35,11 @@ class JessitApp(QObject):
             self._create_qt_application()
             self._check_system_tray()
             self._create_tray_icon()
+            # 先创建聊天窗口（临时agent），然后在创建chat_window后再设置确认回调
             self._create_agent()
             self._create_chat_window()
+            # 创建chat_window后，更新agent的确认回调
+            self._setup_agent_confirmation()
             self._setup_tray_menu()
             # 先显示聊天窗口
             self._show_chat_window_on_startup()
@@ -74,6 +77,11 @@ class JessitApp(QObject):
     def _create_chat_window(self) -> None:
         """创建聊天窗口"""
         self.chat_window = ChatWindow(self.agent)
+    
+    def _setup_agent_confirmation(self) -> None:
+        """设置Agent的确认回调（已在ChatWindow中设置，这里无需操作）"""
+        # 确认回调已在ChatWindow的_setup_confirmation_callback中设置
+        pass
 
     def _setup_tray_menu(self) -> None:
         """设置托盘菜单"""
