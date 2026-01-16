@@ -27,6 +27,13 @@ class JessitAgent:
         self.skill_manager: SkillManager = SkillManager(skills_dir)
         self.confirmation_callback: Optional[Callable[[str, str], bool]] = confirmation_callback
         self.system_prompt = build_system_prompt(experience_file)
+        
+        # 注册LLM提供者到desktop_automation skill（如果存在）
+        try:
+            from skills.desktop_automation.desktop_automation import set_llm_provider
+            set_llm_provider(self.llm)
+        except ImportError:
+            pass  # desktop_automation skill 可能不存在
 
     async def chat(
         self, user_message: str, stream: bool = False

@@ -1,0 +1,30 @@
+{
+  "name": "desktop_automation",
+  "description": "通过截图和鼠标键盘模拟操作桌面应用程序。当任务需要操作已打开的桌面应用（如微信、浏览器等）时，会自动最小化聊天窗口，截取桌面，分析截图并执行操作。",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "task_description": {
+        "type": "string",
+        "description": "要执行的任务描述，例如：'在微信中发送消息给张三'、'在浏览器中搜索Python教程'"
+      },
+      "application_name": {
+        "type": "string",
+        "description": "目标应用程序名称（可选），用于窗口定位，例如：'微信'、'Chrome'"
+      },
+      "max_steps": {
+        "type": "integer",
+        "description": "最大操作步骤数，默认10",
+        "default": 10
+      },
+      "verify_result": {
+        "type": "boolean",
+        "description": "是否在操作后再次截图验证结果，默认false",
+        "default": false
+      }
+    },
+    "required": ["task_description"]
+  },
+  "handler": "desktop_automation.desktop_automation",
+  "enabled": true
+}

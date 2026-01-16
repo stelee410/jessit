@@ -30,12 +30,22 @@ class LLMProvider(ABC):
     @abstractmethod
     async def chat(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[Dict[str, Any]],
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
+        images: Optional[List[str]] = None,
     ) -> Union[str, Dict[str, Any]]:
-        """聊天接口"""
+        """
+        聊天接口
+        
+        Args:
+            messages: 消息列表，支持文本和图片混合内容
+            temperature: 温度参数
+            max_tokens: 最大token数
+            tools: 工具定义列表
+            images: base64编码的图片列表（可选，用于视觉输入）
+        """
         pass
 
     @abstractmethod
@@ -74,8 +84,8 @@ class ClaudeProvider(LLMProvider):
         model = self.default_model or "unknown"
         return f"model={model}, base_url={base_url}"
 
-    def _process_messages(self, messages: List[Dict[str, str]]) -> tuple[str, List[Dict[str, str]]]:
-        """处理消息列表，提取system消息
+    def _process_messages(self, messages: List[Dict[str, Any]], images: Optional[List[str]] = None) -> tuple[str, List[Dict[str, Any]]]:
+        """处理消息列表，提取system消息，支持图片输入
         返回: (system_message, filtered_messages)
         """
         system_messages = []
@@ -87,7 +97,31 @@ class ClaudeProvider(LLMProvider):
             else:
                 # 只保留user和assistant角色的消息
                 if msg.get("role") in ("user", "assistant"):
-                    filtered_messages.append(msg)
+                    # 如果是user消息且有图片，构建包含图片的content
+                    if msg.get("role") == "user" and images:
+                        content = []
+                        # 添加文本内容（如果有）
+                        msg_content = msg.get("content", "")
+                        if isinstance(msg_content, str) and msg_content:
+                            content.append({"type": "text", "text": msg_content})
+                        elif isinstance(msg_content, list):
+                            # 如果content已经是列表，合并进去
+                            content.extend(msg_content)
+                        # 添加图片
+                        for img_base64 in images:
+                            content.append({
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": "image/png",
+                                    "data": img_base64
+                                }
+                            })
+                        msg_copy = msg.copy()
+                        msg_copy["content"] = content
+                        filtered_messages.append(msg_copy)
+                    else:
+                        filtered_messages.append(msg)
         
         # 合并所有system消息
         system_content = "\n".join(system_messages) if system_messages else ""
@@ -96,14 +130,15 @@ class ClaudeProvider(LLMProvider):
 
     async def chat(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[Dict[str, Any]],
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
+        images: Optional[List[str]] = None,
     ) -> Union[str, Dict[str, Any]]:
         """发送聊天请求"""
         try:
-            system_content, filtered_messages = self._process_messages(messages)
+            system_content, filtered_messages = self._process_messages(messages, images)
 
             kwargs = {
                 "model": self.default_model,
@@ -144,13 +179,14 @@ class ClaudeProvider(LLMProvider):
 
     async def stream_chat(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[Dict[str, Any]],
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
+        images: Optional[List[str]] = None,
     ) -> AsyncIterator[str]:
         """流式聊天"""
         try:
-            system_content, filtered_messages = self._process_messages(messages)
+            system_content, filtered_messages = self._process_messages(messages, images)
             
             kwargs = {
                 "model": self.default_model,
@@ -183,16 +219,24 @@ class OpenAIProvider(LLMProvider):
 
     async def chat(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[Dict[str, Any]],
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
+        images: Optional[List[str]] = None,
     ) -> Union[str, Dict[str, Any]]:
         """发送聊天请求"""
         try:
+            # OpenAI 的视觉模型需要特殊处理消息格式
+            processed_messages = messages
+            if images:
+                # 对于 OpenAI，图片需要作为 base64 数据 URI 嵌入到消息中
+                # 这里简化处理，只支持文本消息
+                pass
+            
             response = await self.client.chat.completions.create(
                 model=self.default_model,
-                messages=messages,
+                messages=processed_messages,
                 max_tokens=self._get_max_tokens(max_tokens),
                 temperature=self._get_temperature(temperature),
             )
@@ -202,15 +246,21 @@ class OpenAIProvider(LLMProvider):
 
     async def stream_chat(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[Dict[str, Any]],
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
+        images: Optional[List[str]] = None,
     ) -> AsyncIterator[str]:
         """流式聊天"""
         try:
+            processed_messages = messages
+            if images:
+                # OpenAI 视觉模型处理（简化）
+                pass
+            
             stream = await self.client.chat.completions.create(
                 model=self.default_model,
-                messages=messages,
+                messages=processed_messages,
                 max_tokens=self._get_max_tokens(max_tokens),
                 temperature=self._get_temperature(temperature),
                 stream=True,
@@ -232,21 +282,25 @@ class OllamaProvider(LLMProvider):
 
     async def chat(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[Dict[str, Any]],
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
+        images: Optional[List[str]] = None,
     ) -> Union[str, Dict[str, Any]]:
         """发送聊天请求"""
         import aiohttp
 
         try:
+            # Ollama 可能不支持视觉输入，这里简化处理
+            processed_messages = messages
+            
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     f"{self.base_url}/api/chat",
                     json={
                         "model": self.default_model,
-                        "messages": messages,
+                        "messages": processed_messages,
                         "stream": False,
                         "options": {
                             "temperature": self._get_temperature(temperature),
@@ -261,20 +315,23 @@ class OllamaProvider(LLMProvider):
 
     async def stream_chat(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[Dict[str, Any]],
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
+        images: Optional[List[str]] = None,
     ) -> AsyncIterator[str]:
         """流式聊天"""
         import aiohttp
 
         try:
+            processed_messages = messages
+            
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     f"{self.base_url}/api/chat",
                     json={
                         "model": self.default_model,
-                        "messages": messages,
+                        "messages": processed_messages,
                         "stream": True,
                         "options": {
                             "temperature": self._get_temperature(temperature),

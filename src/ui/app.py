@@ -77,6 +77,13 @@ class JessitApp(QObject):
     def _create_chat_window(self) -> None:
         """创建聊天窗口"""
         self.chat_window = ChatWindow(self.agent)
+        
+        # 注册聊天窗口到desktop_automation skill（如果存在）
+        try:
+            from skills.desktop_automation.desktop_automation import set_chat_window
+            set_chat_window(self.chat_window)
+        except ImportError:
+            pass  # desktop_automation skill 可能不存在
     
     def _setup_agent_confirmation(self) -> None:
         """设置Agent的确认回调（已在ChatWindow中设置，这里无需操作）"""
