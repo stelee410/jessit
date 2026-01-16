@@ -16,6 +16,7 @@ class ChatWorker(QThread):
     response_received = pyqtSignal(str)
     stream_chunk = pyqtSignal(str)
     error_occurred = pyqtSignal(str)
+    progress_updated = pyqtSignal(dict)  # 进度更新信号
 
     def __init__(self, agent: "JessitAgent", user_message: str, stream: bool = False):
         """
@@ -30,6 +31,12 @@ class ChatWorker(QThread):
         self.agent = agent
         self.user_message = user_message
         self.stream = stream
+        self.progress_info = {
+            "analysis": "",
+            "plan": [],
+            "execution_steps": [],
+            "final_result": "",
+        }
 
     def run(self) -> None:
         """执行聊天请求"""
@@ -47,8 +54,30 @@ class ChatWorker(QThread):
 
     async def _stream_chat(self) -> None:
         """流式聊天（使用工具调用，失去实时流式效果但支持工具）"""
+        # 定义进度回调函数
+        def progress_callback(progress_data: dict):
+            """进度回调函数，在主线程中发射信号"""
+            # 更新本地进度信息
+            if "progress_info" in progress_data:
+                self.progress_info = progress_data["progress_info"]
+            elif "analysis" in progress_data:
+                self.progress_info["analysis"] = progress_data["analysis"]
+            elif "plan" in progress_data:
+                self.progress_info["plan"] = progress_data["plan"]
+            elif "step" in progress_data:
+                if progress_data["stage"] == "step_complete":
+                    self.progress_info["execution_steps"].append(progress_data["step"])
+            elif "final_result" in progress_data:
+                self.progress_info["final_result"] = progress_data["final_result"]
+            
+            # 发射进度更新信号
+            self.progress_updated.emit(progress_data)
+        
         # 由于工具调用需要完整响应，这里使用 chat_with_tools
-        response = await self.agent.chat_with_tools(self.user_message)
+        response = await self.agent.chat_with_tools(
+            self.user_message,
+            progress_callback=progress_callback
+        )
 
         # 模拟流式输出（一次性发送完整响应）
         full_response = response
@@ -67,6 +96,28 @@ class ChatWorker(QThread):
 
     async def _normal_chat(self) -> None:
         """普通聊天（带工具调用）"""
+        # 定义进度回调函数
+        def progress_callback(progress_data: dict):
+            """进度回调函数，在主线程中发射信号"""
+            # 更新本地进度信息
+            if "progress_info" in progress_data:
+                self.progress_info = progress_data["progress_info"]
+            elif "analysis" in progress_data:
+                self.progress_info["analysis"] = progress_data["analysis"]
+            elif "plan" in progress_data:
+                self.progress_info["plan"] = progress_data["plan"]
+            elif "step" in progress_data:
+                if progress_data["stage"] == "step_complete":
+                    self.progress_info["execution_steps"].append(progress_data["step"])
+            elif "final_result" in progress_data:
+                self.progress_info["final_result"] = progress_data["final_result"]
+            
+            # 发射进度更新信号
+            self.progress_updated.emit(progress_data)
+        
         # 使用 chat_with_tools 支持工具调用
-        response = await self.agent.chat_with_tools(self.user_message)
+        response = await self.agent.chat_with_tools(
+            self.user_message,
+            progress_callback=progress_callback
+        )
         self.response_received.emit(response)
